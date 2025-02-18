@@ -72,6 +72,14 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/product", productHandler)
 	router.HandleFunc("/vendor", vendorHandler)
+
+	// To handle host based routing
+	// productRouter := router.Host("product.api").Subrouter()
+	// productRouter.PathPrefix("/product").HandlerFunc(productHandler)
+
+	// vendorRouter := router.Host("vendor.api").Subrouter()
+	// vendorRouter.PathPrefix("/vendor").HandlerFunc(vendorHandler)
+
 	http.Handle("/", router)
 
 	log.Println("Starting API gateway on :8000")
