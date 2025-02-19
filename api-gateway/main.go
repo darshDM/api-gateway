@@ -5,84 +5,78 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/DarshDM/api-gateway/internal/config"
 	"github.com/gorilla/mux"
 )
 
-func productHandler(res http.ResponseWriter, req *http.Request) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	proxyReq, err := http.NewRequest(req.Method, "http://product.api:3000/", bytes.NewReader(body))
-	if err != nil {
-		http.Error(res, "There are issues with request url", http.StatusBadRequest)
-	}
-	log.Println("after making")
-	proxyReq.Header = make(http.Header)
-	for h, val := range req.Header {
-		proxyReq.Header[h] = val
-	}
-
-	client := &http.Client{}
-	response, err := client.Do(proxyReq)
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusBadRequest)
-	}
-	log.Println(body, response)
-	original_header := res.Header()
-	for h, val := range response.Header {
-		original_header[h] = val
-	}
-	io.Copy(res, response.Body)
-	response.Body.Close()
+type Gateway struct {
+	servers []config.Server
+	logger  *log.Logger
 }
 
-func vendorHandler(res http.ResponseWriter, req *http.Request) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-		return
-	}
+func CreateHandler(server *config.Server, logger *log.Logger) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(res, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		proxyReq, err := http.NewRequest(req.Method, server.Host, bytes.NewReader(body))
+		if err != nil {
+			http.Error(res, "There are issues with request url", http.StatusBadRequest)
+		}
+		proxyReq.Header = make(http.Header)
+		for h, val := range req.Header {
+			proxyReq.Header[h] = val
+		}
 
-	proxyReq, err := http.NewRequest(req.Method, "http://vendor.api:3001/", bytes.NewReader(body))
-	if err != nil {
-		http.Error(res, "There are issues with request url", http.StatusBadRequest)
-	}
-	proxyReq.Header = make(http.Header)
-	for h, val := range req.Header {
-		proxyReq.Header[h] = val
-	}
+		client := &http.Client{}
+		response, err := client.Do(proxyReq)
+		if err != nil {
+			http.Error(res, err.Error(), http.StatusBadRequest)
+		}
 
-	client := &http.Client{}
-	response, err := client.Do(proxyReq)
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusBadRequest)
+		original_header := res.Header()
+		for h, val := range response.Header {
+			original_header[h] = val
+		}
+		io.Copy(res, response.Body)
+		response.Body.Close()
 	}
-	original_header := res.Header()
-	for h, val := range response.Header {
-		original_header[h] = val
+}
+func (g *Gateway) AssignHandlers() *mux.Router {
+	router := mux.NewRouter()
+	for _, server := range g.servers {
+		g.logger.Printf("Registering handler for prefix: %s -> %s", server.Prefix, server.Host)
+		router.PathPrefix(server.Prefix).Handler(CreateHandler(&server, g.logger)).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 	}
-	io.Copy(res, response.Body)
-	response.Body.Close()
+	router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.logger.Printf("Catch-all handler hit: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "No matching route", http.StatusNotFound)
+	})
+	return router
+
+}
+func NewGateway(servers []config.Server, l *log.Logger) (*Gateway, error) {
+	return &Gateway{servers: servers, logger: l}, nil
 }
 func main() {
-	router := mux.NewRouter()
-	router.HandleFunc("/product", productHandler)
-	router.HandleFunc("/vendor", vendorHandler)
 
-	// To handle host based routing
-	// productRouter := router.Host("product.api").Subrouter()
-	// productRouter.PathPrefix("/product").HandlerFunc(productHandler)
+	// Add logger
+	l := log.New(os.Stdout, "api-gateway:", log.LstdFlags)
 
-	// vendorRouter := router.Host("vendor.api").Subrouter()
-	// vendorRouter.PathPrefix("/vendor").HandlerFunc(vendorHandler)
-
+	cfg, err := config.Load(".", l)
+	if err != nil {
+		l.Fatal(err)
+	}
+	gateway, err := NewGateway(cfg.Servers, l)
+	if err != nil {
+		l.Fatal("Error while creating Gateway instance.")
+	}
+	router := gateway.AssignHandlers()
 	http.Handle("/", router)
-
-	log.Println("Starting API gateway on :8000")
-	log.Fatal(http.ListenAndServe(":8000", nil))
+	l.Fatal(http.ListenAndServe(":8000", nil))
 
 }
