@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
+
 	"net/http"
-	"os"
+
+	"github.com/didip/tollbooth/v8"
+	"github.com/didip/tollbooth/v8/limiter"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/DarshDM/api-gateway/internal/config"
 	"github.com/DarshDM/api-gateway/middleware/requestid"
@@ -22,7 +25,14 @@ type Gateway struct {
 func CreateHandler(server *config.Server, logger *log.Logger) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		requestId := requestid.GetRequestID(req.Context())
-		logger.Printf("[%s] %s %s: %s", requestId, req.RemoteAddr, req.Method, req.URL)
+		// logger.Printf("[%s] %s %s: %s", requestId, req.RemoteAddr, req.Method, req.URL)
+		logger.WithFields(log.Fields{
+			"service":   "api-gateway",
+			"requestId": requestId,
+			"IP":        req.RemoteAddr,
+			"Method":    req.Method,
+			"URL":       req.URL.Path,
+		}).Info("New Request")
 
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -38,18 +48,43 @@ func CreateHandler(server *config.Server, logger *log.Logger) http.HandlerFunc {
 		for h, val := range req.Header {
 			proxyReq.Header[h] = val
 		}
-		logger.Printf("[%s] Proxy call to %v", requestId, server.Host)
+		logger.WithFields(log.Fields{
+			"service":   "api-gateway",
+			"requestId": requestId,
+			"IP":        req.RemoteAddr,
+			"Method":    req.Method,
+			"URL":       req.URL.Path,
+		}).Info("Calling service")
+		logger.WithFields(log.Fields{
+			"service":   "api-gateway",
+			"requestId": requestId,
+			"IP":        req.RemoteAddr,
+			"Method":    req.Method,
+			"URL":       req.URL.Path,
+		}).Infof("Proxy call to %v", server.Host)
 		proxyReq.Header.Set("x-forwarded-for", req.RemoteAddr)
 		client := &http.Client{}
 		response, err := client.Do(proxyReq)
 
 		if err != nil {
-			logger.Printf("%v is down,%s", server.Name, err.Error())
+			logger.WithFields(log.Fields{
+				"service":   server.Name,
+				"requestId": requestId,
+				"IP":        req.RemoteAddr,
+				"Method":    req.Method,
+				"URL":       req.URL.Path,
+			}).Errorf("Service is down: %s", err.Error())
 			user_error := fmt.Sprintf("%v service is unavailable", server.Name)
 			http.Error(res, user_error, http.StatusBadRequest)
 			return
 		}
-		logger.Printf("[%s] Service response: %v", requestId, response.Status)
+		logger.WithFields(log.Fields{
+			"service":   server.Name,
+			"requestId": requestId,
+			"IP":        req.RemoteAddr,
+			"Method":    req.Method,
+			"URL":       req.URL.Path,
+		}).Infof("Service response: %v", response.Status)
 		original_header := res.Header()
 		for h, val := range response.Header {
 			original_header[h] = val
@@ -76,10 +111,14 @@ func (g *Gateway) AssignHandlers() *mux.Router {
 	router := mux.NewRouter()
 
 	for _, server := range g.servers {
-		g.logger.Printf("🚀Registering handler for prefix: %s -> %s", server.Prefix, server.Host)
+		g.logger.WithFields(log.Fields{
+			"service": "api-gateway",
+		}).Infof("🚀Registering handler for prefix: %s -> %s", server.Prefix, server.Host)
 		handler := CreateHandler(&server, g.logger)
 		router.PathPrefix(server.Prefix).Handler(requestid.RequestIDMiddleware(handler)).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
-		g.logger.Printf("✅Registed handler for prefix: %s -> %s", server.Prefix, server.Host)
+		g.logger.WithFields(log.Fields{
+			"service": "api-gateway",
+		}).Infof("✅Registed handler for prefix: %s -> %s", server.Prefix, server.Host)
 	}
 	handler := CreateNoMatchHandler(g.logger)
 	router.PathPrefix("/").Handler(requestid.RequestIDMiddleware(handler))
@@ -91,9 +130,8 @@ func NewGateway(servers []config.Server, l *log.Logger) (*Gateway, error) {
 }
 func main() {
 
-	// Add logger
-	l := log.New(os.Stdout, "api-gateway:", log.LstdFlags)
-
+	l := log.New()
+	l.SetFormatter(&log.JSONFormatter{})
 	cfg, err := config.Load(".", l)
 	if err != nil {
 		l.Fatal(err)
@@ -103,7 +141,16 @@ func main() {
 		l.Fatal("Error while creating Gateway instance.")
 	}
 	router := gateway.AssignHandlers()
-	http.Handle("/", router)
+
+	lmt := tollbooth.NewLimiter(2, nil)
+	lmt.SetIPLookup(limiter.IPLookup{
+		Name: "RemoteAddr",
+	})
+	http.Handle("/", tollbooth.HTTPMiddleware(lmt)(router))
+	l.WithFields(log.Fields{
+		"service": "api-gateway",
+		"port":    8001,
+	}).Info("API-gateway running on port 8001")
 	l.Fatal(http.ListenAndServe(":8001", nil))
 
 }
