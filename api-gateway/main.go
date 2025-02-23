@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/DarshDM/api-gateway/internal/config"
+	"github.com/DarshDM/api-gateway/middleware/auth"
 	"github.com/DarshDM/api-gateway/middleware/requestid"
 	gatewayError "github.com/DarshDM/api-gateway/utils/error"
 	"github.com/gorilla/mux"
@@ -100,7 +101,7 @@ func CreateNoMatchHandler(logger *log.Logger) http.HandlerFunc {
 		logger.Printf("[%s] New Request %s %s: %s", requestId, r.RemoteAddr, r.Method, r.URL)
 		logger.Printf("[%s] No services registered for: %s %s", requestId, r.Method, r.URL.Path)
 		err := &gatewayError.GatewayError{
-			Service: "gateway",
+			Service: r.URL.Path,
 			Message: "Service not found",
 			Code:    http.StatusBadGateway,
 		}
@@ -115,7 +116,9 @@ func (g *Gateway) AssignHandlers() *mux.Router {
 			"service": "api-gateway",
 		}).Infof("🚀Registering handler for prefix: %s -> %s", server.Prefix, server.Host)
 		handler := CreateHandler(&server, g.logger)
-		router.PathPrefix(server.Prefix).Handler(requestid.RequestIDMiddleware(handler)).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
+		authHandler := auth.AuthMiddleware(&server, g.logger, handler)
+		requestIDHandler := requestid.RequestIDMiddleware(authHandler)
+		router.PathPrefix(server.Prefix+"/").Handler(requestIDHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 		g.logger.WithFields(log.Fields{
 			"service": "api-gateway",
 		}).Infof("✅Registed handler for prefix: %s -> %s", server.Prefix, server.Host)

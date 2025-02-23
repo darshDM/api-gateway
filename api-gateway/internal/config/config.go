@@ -13,6 +13,7 @@ type Server struct {
 	Host   string `mapstructure:"host"`
 	Prefix string `mapstructure:"prefix"`
 	Port   int    `mapstructure:"port"`
+	ApiKey string `mapstructure:"api_key"`
 }
 
 type Config struct {
