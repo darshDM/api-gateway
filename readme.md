@@ -8,6 +8,7 @@ This API Gateway is built using Golang and provides essential functionalities su
 - **Rate Limiting**: Limits the number of requests per second using `tollbooth`.
 - **Service Routing**: Routes requests based on URL prefixes defined in `config.yaml`.
 - **Logging**: Uses `logrus` for structured logging.
+- **Authentication**: Basic Authentication using `x-api-key` by matching same in `config.yaml`
 
 ## Configuration
 
@@ -19,11 +20,13 @@ servers:
     host: "http://product.api:3000"
     prefix: "/product"
     port: 3000
+    api_key: "uit39t8tvjwrfj05ldsf-0"
   
   - name: "vendor"
     host: "http://vendor.api:3001"
     prefix: "/vendor"
     port: 3001
+    api_key: "sdfjfhasdjdf123ksmdf"
 ```
 
 ## Running the API Gateway
@@ -65,8 +68,8 @@ go run main.go
 Once the gateway is running, you can test requests:
 
 ```sh
-curl http://localhost:8001/product
-curl http://localhost:8001/vendor
+curl -v -H "x-api-key:sdfjfhasdjdf123ksmdf" "localhost:8001/vendor/new"
+curl -v -H "x-api-key:uit39t8tvjwrfj05ldsf-0" "localhost:8001/product/test"
 ```
 
 ### Rate Limiting Test
