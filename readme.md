@@ -80,7 +80,7 @@ Once the gateway is running, you can test requests:
 
 ```sh
 curl -v -H "x-api-key:sdfjfhasdjdf123ksmdf" "localhost:8001/vendor/new"
-curl -v -H "x-api-key:uit39t8tvjwrfj05ldsf-0" "localhost:8001/product/test"
+curl -v -H "x-api-key:uit39t8tvjwrfj05ldsf" "localhost:8001/product/test"
 ```
 
 ### Rate Limiting Test
