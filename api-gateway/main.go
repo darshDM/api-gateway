@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
 	"net/http"
 
 	"github.com/didip/tollbooth/v8"
 	"github.com/didip/tollbooth/v8/limiter"
 	log "github.com/sirupsen/logrus"
+
+	reqLog "github.com/DarshDM/api-gateway/utils/log"
 
 	"github.com/DarshDM/api-gateway/internal/config"
 	"github.com/DarshDM/api-gateway/middleware/auth"
@@ -19,79 +22,65 @@ import (
 )
 
 type Gateway struct {
-	servers []config.Server
-	logger  *log.Logger
+	servers   []config.Server
+	logger    *log.Logger
+	hostIndex sync.Map
 }
 
-func CreateHandler(server *config.Server, logger *log.Logger) http.HandlerFunc {
+// Add Logic for basic load balancer
+func (g *Gateway) getNextHost(server *config.Server, hostIndex *sync.Map) string {
+	key := server.Name
+	value, _ := hostIndex.Load(key)
+	currentIndex := 0
+	if value != nil {
+		currentIndex = value.(int)
+	}
+	nextIndex := (currentIndex + 1) % len(server.Hosts)
+	hostIndex.Store(key, nextIndex)
+	return server.Hosts[nextIndex]
+}
+
+func (g *Gateway) proxyRequest(server *config.Server, req *http.Request) (*http.Response, error) {
+	host := g.getNextHost(server, &g.hostIndex)
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	proxyReq, err := http.NewRequest(req.Method, host, bytes.NewReader(body))
+	proxyReq.Header = make(http.Header)
+	for h, val := range req.Header {
+		proxyReq.Header[h] = val
+	}
+	proxyReq.Header.Set("x-forwarded-for", req.RemoteAddr)
+	client := &http.Client{}
+	return client.Do(proxyReq)
+
+}
+
+func Proxyresponse(res http.ResponseWriter, response *http.Response, logger *log.Logger, r *http.Request) {
+	requestLogger := reqLog.RequestLogger(logger, r)
+	requestLogger.Infof("Service response: %v", response.Status)
+	original_header := res.Header()
+	for h, val := range response.Header {
+		original_header[h] = val
+	}
+	io.Copy(res, response.Body)
+	response.Body.Close()
+}
+func (g *Gateway) CreateHandler(server *config.Server, logger *log.Logger) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-		requestId := requestid.GetRequestID(req.Context())
-		// logger.Printf("[%s] %s %s: %s", requestId, req.RemoteAddr, req.Method, req.URL)
-		logger.WithFields(log.Fields{
-			"service":   "api-gateway",
-			"requestId": requestId,
-			"IP":        req.RemoteAddr,
-			"Method":    req.Method,
-			"URL":       req.URL.Path,
-		}).Info("New Request")
 
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			http.Error(res, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		proxyReq, err := http.NewRequest(req.Method, server.Host, bytes.NewReader(body))
-		if err != nil {
-			http.Error(res, "invalid request Check request parameters and body.", http.StatusBadRequest)
-			return
-		}
-		proxyReq.Header = make(http.Header)
-		for h, val := range req.Header {
-			proxyReq.Header[h] = val
-		}
-		logger.WithFields(log.Fields{
-			"service":   "api-gateway",
-			"requestId": requestId,
-			"IP":        req.RemoteAddr,
-			"Method":    req.Method,
-			"URL":       req.URL.Path,
-		}).Info("Calling service")
-		logger.WithFields(log.Fields{
-			"service":   "api-gateway",
-			"requestId": requestId,
-			"IP":        req.RemoteAddr,
-			"Method":    req.Method,
-			"URL":       req.URL.Path,
-		}).Infof("Proxy call to %v", server.Host)
-		proxyReq.Header.Set("x-forwarded-for", req.RemoteAddr)
-		client := &http.Client{}
-		response, err := client.Do(proxyReq)
+		requestLogger := reqLog.RequestLogger(logger, req)
+		requestLogger.Infof("Request received")
+		response, err := g.proxyRequest(server, req)
 
 		if err != nil {
-			logger.WithFields(log.Fields{
-				"service":   server.Name,
-				"requestId": requestId,
-				"IP":        req.RemoteAddr,
-				"Method":    req.Method,
-				"URL":       req.URL.Path,
-			}).Errorf("Service is down: %s", err.Error())
+			requestLogger.Errorf("Service is down: %s", err.Error())
 			user_error := fmt.Sprintf("%v service is unavailable", server.Name)
 			http.Error(res, user_error, http.StatusBadRequest)
 			return
 		}
-		logger.WithFields(log.Fields{
-			"service":   server.Name,
-			"requestId": requestId,
-			"IP":        req.RemoteAddr,
-			"Method":    req.Method,
-			"URL":       req.URL.Path,
-		}).Infof("Service response: %v", response.Status)
-		original_header := res.Header()
-		for h, val := range response.Header {
-			original_header[h] = val
-		}
-		io.Copy(res, response.Body)
-		response.Body.Close()
+		Proxyresponse(res, response, logger, req)
 	}
 }
 
@@ -114,14 +103,15 @@ func (g *Gateway) AssignHandlers() *mux.Router {
 	for _, server := range g.servers {
 		g.logger.WithFields(log.Fields{
 			"service": "api-gateway",
-		}).Infof("🚀Registering handler for prefix: %s -> %s", server.Prefix, server.Host)
-		handler := CreateHandler(&server, g.logger)
+		}).Infof("🚀Registering handler for prefix: %s -> %s", server.Prefix, server.Hosts[0])
+		handler := g.CreateHandler(&server, g.logger)
 		authHandler := auth.AuthMiddleware(&server, g.logger, handler)
 		requestIDHandler := requestid.RequestIDMiddleware(authHandler)
+		router.Path(server.Prefix).Handler(requestIDHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 		router.PathPrefix(server.Prefix+"/").Handler(requestIDHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 		g.logger.WithFields(log.Fields{
 			"service": "api-gateway",
-		}).Infof("✅Registed handler for prefix: %s -> %s", server.Prefix, server.Host)
+		}).Infof("✅Registed handler for prefix: %s -> %s", server.Prefix, server.Hosts[0])
 	}
 	handler := CreateNoMatchHandler(g.logger)
 	router.PathPrefix("/").Handler(requestid.RequestIDMiddleware(handler))
@@ -129,7 +119,12 @@ func (g *Gateway) AssignHandlers() *mux.Router {
 
 }
 func NewGateway(servers []config.Server, l *log.Logger) (*Gateway, error) {
-	return &Gateway{servers: servers, logger: l}, nil
+	return &Gateway{
+			servers:   servers,
+			logger:    l,
+			hostIndex: sync.Map{},
+		},
+		nil
 }
 func main() {
 

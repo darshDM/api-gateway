@@ -1,12 +1,16 @@
 servers:
   - name: "product"
-    host: "http://product.api:3000"
+    hosts: 
+      - "http://product.api:3000"
+      - "http://vendor.api:3001"
+
     prefix: "/product"
     port: 3000
-    api_key: "uit39t8tvjwrfj05ldsf-0"
+    api_key: "uit39t8tvjwrfj05ldsf"
   
   - name: "vendor"
-    host: "http://vendor.api:3001"
+    hosts: 
+      - "http://vendor.api:3001"
     prefix: "/vendor"
     port: 3001
     api_key: "sdfjfhasdjdf123ksmdf"

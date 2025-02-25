@@ -9,6 +9,14 @@ This API Gateway is built using Golang and provides essential functionalities su
 - **Service Routing**: Routes requests based on URL prefixes defined in `config.yaml`.
 - **Logging**: Uses `logrus` for structured logging.
 - **Authentication**: Basic Authentication using `x-api-key` by matching same in `config.yaml`
+- **Load balancer**: Round robin technique for load balancing
+
+## Todo
+- [ ] Service based rate limit
+- [x] Refine Path handling
+- [x] Load balancing
+- [ ] Circuit breaking
+- [ ] Context checking
 
 ## Configuration
 
@@ -17,13 +25,16 @@ The services to be proxied are defined in `config.yaml`. Example:
 ```yaml
 servers:
   - name: "product"
-    host: "http://product.api:3000"
+    hosts: 
+      - "http://product.api:3000"
+      - "http://product.api:3003"
     prefix: "/product"
     port: 3000
-    api_key: "uit39t8tvjwrfj05ldsf-0"
+    api_key: "uit39t8tvjwrfj05ldsf"
   
   - name: "vendor"
-    host: "http://vendor.api:3001"
+    hosts: 
+      - "http://vendor.api:3001"
     prefix: "/vendor"
     port: 3001
     api_key: "sdfjfhasdjdf123ksmdf"
