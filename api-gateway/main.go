@@ -8,14 +8,13 @@ import (
 
 	"net/http"
 
-	"github.com/didip/tollbooth/v8"
-	"github.com/didip/tollbooth/v8/limiter"
 	log "github.com/sirupsen/logrus"
 
 	reqLog "github.com/DarshDM/api-gateway/utils/log"
 
 	"github.com/DarshDM/api-gateway/internal/config"
 	"github.com/DarshDM/api-gateway/middleware/auth"
+	"github.com/DarshDM/api-gateway/middleware/ratelimit"
 	"github.com/DarshDM/api-gateway/middleware/requestid"
 	gatewayError "github.com/DarshDM/api-gateway/utils/error"
 	"github.com/gorilla/mux"
@@ -99,7 +98,7 @@ func CreateNoMatchHandler(logger *log.Logger) http.HandlerFunc {
 }
 func (g *Gateway) AssignHandlers() *mux.Router {
 	router := mux.NewRouter()
-
+	rateLimiter := ratelimit.NewRateLimiter(g.servers, g.logger)
 	for _, server := range g.servers {
 		g.logger.WithFields(log.Fields{
 			"service": "api-gateway",
@@ -107,7 +106,9 @@ func (g *Gateway) AssignHandlers() *mux.Router {
 		handler := g.CreateHandler(&server, g.logger)
 		authHandler := auth.AuthMiddleware(&server, g.logger, handler)
 		requestIDHandler := requestid.RequestIDMiddleware(authHandler)
-		router.Path(server.Prefix).Handler(requestIDHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
+
+		rateLimitHandler := rateLimiter.RateLimitMiddleware(requestIDHandler)
+		router.Path(server.Prefix).Handler(rateLimitHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 		router.PathPrefix(server.Prefix+"/").Handler(requestIDHandler).Methods("GET", "POST", "PUT", "DELETE", "PATCH")
 		g.logger.WithFields(log.Fields{
 			"service": "api-gateway",
@@ -140,11 +141,11 @@ func main() {
 	}
 	router := gateway.AssignHandlers()
 
-	lmt := tollbooth.NewLimiter(2, nil)
-	lmt.SetIPLookup(limiter.IPLookup{
-		Name: "RemoteAddr",
-	})
-	http.Handle("/", tollbooth.HTTPMiddleware(lmt)(router))
+	// lmt := tollbooth.NewLimiter(2, nil)
+	// lmt.SetIPLookup(limiter.IPLookup{
+	// 	Name: "RemoteAddr",
+	// })
+	http.Handle("/", router)
 	l.WithFields(log.Fields{
 		"service": "api-gateway",
 		"port":    8001,

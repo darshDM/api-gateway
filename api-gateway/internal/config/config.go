@@ -12,13 +12,12 @@ import (
 )
 
 type Server struct {
-	Name             string   `mapstructure:"name"`
-	Prefix           string   `mapstructure:"prefix"`
-	Hosts            []string `mapstructure:"hosts"`
-	Port             int      `mapstructure:"port"`
-	ApiKey           string   `mapstructure:"api_key"`
-	ClientRateLimit  int      `mapstructure:"client_rate_limit"`
-	ServiceRateLimit int      `mapstructure:"service_rate_limit"`
+	Name      string   `mapstructure:"name"`
+	Prefix    string   `mapstructure:"prefix"`
+	Hosts     []string `mapstructure:"hosts"`
+	Port      int      `mapstructure:"port"`
+	ApiKey    string   `mapstructure:"api_key"`
+	RateLimit int      `mapstructure:"rate_limit"`
 }
 
 type Config struct {
@@ -67,12 +66,9 @@ func Load(path string, l *log.Logger) (*Config, error) {
 		if server.Port <= 0 {
 			return nil, &gatewayError.GatewayError{Service: "config", Message: fmt.Sprintf("Server %d: port must be positive", i), Code: http.StatusInternalServerError}
 		}
-		if server.ClientRateLimit <= 0 {
-			return nil, &gatewayError.GatewayError{Service: "config", Message: fmt.Sprintf("Server %d: client_rate_limit must be positive", i), Code: http.StatusInternalServerError}
-		}
-		if server.ServiceRateLimit <= 0 {
-			return nil, &gatewayError.GatewayError{Service: "config", Message: fmt.Sprintf("Server %d: service_rate_limit must be positive", i), Code: http.StatusInternalServerError}
-		}
+		// if server.RateLimit <= 0 {
+		// 	return nil, &gatewayError.GatewayError{Service: "config", Message: fmt.Sprintf("Server %d: rate_limit must be positive", i), Code: http.StatusInternalServerError}
+		// }
 		if !strings.HasPrefix(server.Prefix, "/") {
 			server.Prefix = "/" + server.Prefix
 			l.Warnf("Server %s: prefix adjusted to start with '/': %s", server.Name, server.Prefix)
