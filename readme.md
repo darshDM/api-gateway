@@ -12,7 +12,7 @@ This API Gateway is built using Golang and provides essential functionalities su
 - **Load balancer**: Round robin technique for load balancing
 
 ## Todo
-- [ ] Service based rate limit
+- [x] Service based rate limit
 - [x] Refine Path handling
 - [x] Load balancing
 - [ ] Circuit breaking
@@ -27,17 +27,18 @@ servers:
   - name: "product"
     hosts: 
       - "http://product.api:3000"
-      - "http://product.api:3003"
     prefix: "/product"
     port: 3000
     api_key: "uit39t8tvjwrfj05ldsf"
-  
+    rate_limit: 5
+    
   - name: "vendor"
     hosts: 
       - "http://vendor.api:3001"
     prefix: "/vendor"
     port: 3001
     api_key: "sdfjfhasdjdf123ksmdf"
+    rate_limit: 2
 ```
 
 ## Running the API Gateway
